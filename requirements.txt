@@ -1,5 +1,4 @@
 streamlit
-playwright
 mss
 opencv-python
 numpy
