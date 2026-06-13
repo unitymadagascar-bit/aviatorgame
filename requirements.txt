@@ -1,9 +1,8 @@
 streamlit
+playwright
 mss
-opencv-python-headless
+opencv-python
 numpy
 pandas
 matplotlib
 Pillow
-pytesseract
-playwright

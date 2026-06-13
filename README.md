@@ -1,130 +1,137 @@
-# Crash Live Screen Counter
+# Crash Live Counter
 
-Crash Live Screen Counter est une application Python Streamlit dont le fichier principal est `app.py`.
+Crash Live Counter est une application Python Streamlit pour analyser l'historique visible d'un crash game et compter les multiplicateurs par couleur.
 
-Elle sert a analyser une capture d'ecran ou une zone visible de l'ecran pour compter les couleurs d'un historique de crash game et lire, si possible, des gains visibles avec OCR.
+Categories :
 
-Important : l'application ne predit pas le prochain tour, ne garantit aucun gain et ne doit pas automatiser les paris.
+- Bleu
+- Autres couleurs : violet, rose, rouge, vert
 
-## Installation locale
+L'application analyse seulement des resultats passes visibles ou deja enregistres. Elle ne predit pas le prochain tour, ne garantit aucun gain et ne propose aucune strategie de mise.
+
+## Installation
 
 ```bash
 pip install -r requirements.txt
-python -m playwright install chromium
+playwright install
 ```
 
-## Lancement local
+## Lancement
 
 ```bash
 streamlit run app.py
 ```
 
-## Utilisation
+## Modes disponibles
 
-### Methode simple : Print Screen puis coller
+### 1. URL avec Playwright
 
-1. Ouvrir la page du jeu.
-2. Faire `PrtSc` ou `Win + Shift + S`.
-3. Revenir dans l'application Streamlit.
-4. Cliquer sur `Coller depuis le presse-papiers`.
-5. Verifier la capture affichee et les resultats.
-6. Activer le mode debug si necessaire.
-7. Telecharger le CSV si besoin.
+Ce mode ouvre l'URL avec Playwright, attend le chargement, prend une capture, puis analyse l'image avec OpenCV.
 
-### Methode alternative : importer une image
+Options :
 
-1. Enregistrer une capture d'ecran en PNG/JPG.
-2. Cliquer sur l'import d'image dans l'application.
-3. Cliquer sur `Analyser l'image importee`.
+- Champ URL
+- Bouton `Analyser URL`
+- Capture pleine page
+- Capture zone personnalisee avec `x`, `y`, `largeur`, `hauteur`
 
-### Methode avancee : scan live
+Si l'URL est bloquee par login, iframe, Cloudflare ou restriction du site, l'application affiche :
 
-1. Ouvrir la page du jeu.
-2. Entrer les coordonnees `x`, `y`, `largeur`, `hauteur` de la zone a scanner.
-3. Cliquer sur `Demarrer le scan`.
-4. Ajuster les sliders HSV si necessaire.
-
-### Methode automatique : scanner depuis une URL
-
-1. Lancer l'application en local.
-2. Coller l'URL du site dans `URL du site`.
-3. Garder `Afficher le navigateur` active si le site demande une connexion ou une verification manuelle.
-4. Cliquer sur `Demarrer l'analyse URL`.
-5. Le premier scan sert de point de depart.
-6. L'application compte ensuite seulement les nouveaux tours detectes apres ce point.
-7. Ouvrir `Dernier tour a suivre` et placer le rectangle jaune sur le multiplicateur le plus recent.
-8. Sur Bet261/Aviator, ce multiplicateur est generalement le premier chiffre a gauche dans `HISTORIQUE DE LA MANCHE`.
-9. Activer `Mode debug` pour verifier que le rectangle jaune couvre bien ce chiffre, pas l'avion, le graphe ou les boutons.
-10. Si la bande d'historique n'est pas bien cadree, ouvrir `Zone historique URL a analyser` et reduire la zone pour garder uniquement l'historique des multiplicateurs.
-
-Ce mode observe seulement la page. Il ne clique pas, ne se connecte pas automatiquement et ne place aucune mise.
-
-## Deploiement recommande
-
-### Streamlit Community Cloud
-
-Plateforme recommandee pour une app Streamlit simple.
-
-1. Pousser ce depot sur GitHub.
-2. Aller sur Streamlit Community Cloud.
-3. Creer une nouvelle app depuis le depot GitHub.
-4. Choisir `app.py` comme fichier principal.
-5. Laisser Streamlit installer les dependances depuis `requirements.txt`.
-
-Le fichier `packages.txt` installe `tesseract-ocr` sur Streamlit Community Cloud pour aider `pytesseract`.
-
-### Render
-
-Render peut lancer l'app comme service web Streamlit.
-
-Le fichier `render.yaml` est fourni avec :
-
-```bash
-pip install -r requirements.txt
-streamlit run app.py --server.address 0.0.0.0 --server.port $PORT
+```text
+Impossible de lire automatiquement cette URL. Utilisez le mode scan ecran local.
 ```
 
-Sur Render, creer un Web Service depuis ce depot, ou utiliser le blueprint `render.yaml`.
+### 2. Scan ecran local
 
-## Ne pas utiliser Vercel pour cette app
+Ce mode utilise `mss` pour scanner ce qui est visible sur votre ecran.
 
-Vercel n'est pas adapte ici pour lancer Streamlit directement. Son runtime Python attend une fonction exportee nommee `app`, `application` ou `handler`, comme pour une API Python.
+Reglages :
 
-Ce projet doit rester une application Streamlit avec :
+- `x`
+- `y`
+- `largeur`
+- `hauteur`
+- intervalle de scan de 1 a 10 secondes
+- boutons `Demarrer scan` et `Arreter scan`
 
-```bash
-streamlit run app.py
-```
+La derniere zone scannee est affichee dans le dashboard.
 
-Il ne faut pas transformer `app.py` en fonction API Vercel.
+### 3. Manuel
 
-## OCR et Tesseract
+Ce mode sert lorsque l'automatique ne lit pas bien l'historique.
 
-`pytesseract` est une interface Python. Pour que l'OCR fonctionne, le binaire Tesseract OCR doit aussi etre installe dans l'environnement.
+Boutons :
 
-- Sur Streamlit Community Cloud, `packages.txt` installe `tesseract-ocr`.
-- En local, installer Tesseract OCR puis verifier qu'il est disponible dans le `PATH`.
-- Si Tesseract est trop complique a installer, `easyocr` peut etre envisage comme alternative dans une version future.
+- `+1 Bleu`
+- `-1 Bleu`
+- `+1 Autres couleurs`
+- `-1 Autres couleurs`
+- `Reset manuel`
+- `Ajouter le manuel au cumul`
 
-## Playwright
+## Statistiques
 
-Le mode `Scanner depuis une URL` utilise Playwright pour ouvrir la page et prendre des captures.
+L'application affiche deux niveaux de statistiques.
 
-Apres l'installation Python, lancer une fois :
+### Scan actuel
 
-```bash
-python -m playwright install chromium
-```
+- Bleu scan actuel
+- Autres couleurs scan actuel
+- Total scan actuel
+- Pourcentage bleu scan actuel
+- Pourcentage autres scan actuel
 
-## Limites importantes
+### Cumul global depuis le lancement
 
-- L'application analyse seulement ce qui est visible sur l'ecran.
-- Sur un hebergement cloud, le serveur ne peut pas voir l'ecran local de l'utilisateur comme une application lancee sur son ordinateur.
-- Le mode `Coller depuis le presse-papiers` et le scan live sont donc surtout adaptes a une execution locale.
-- Le mode URL depend du chargement du site. Si le site bloque l'automatisation, demande un captcha ou une connexion, il faut verifier manuellement dans le navigateur ouvert.
-- L'application ne doit pas contourner les protections du site.
-- Les donnees OCR peuvent contenir des erreurs.
-- Les tours d'un crash game sont normalement independants.
-- L'application ne predit pas le prochain tour.
-- L'application ne garantit aucun gain.
+- Total Bleu global
+- Total Autres couleurs global
+- Total tours global
+- Pourcentage Bleu global
+- Pourcentage Autres couleurs global
+
+Le cumul global garde les anciens scans meme quand ils ne sont plus visibles a l'ecran.
+
+## Anti-doublon
+
+Chaque scan recoit une signature construite avec les blocs detectes, leurs positions et leurs couleurs.
+
+- Si le scan actuel est identique au scan precedent ajoute, il n'est pas ajoute automatiquement au cumul.
+- L'option `Ajout automatique au cumul si nouveau scan detecte` ajoute seulement les scans nouveaux.
+- Le bouton `Ajouter ce scan au cumul` permet de confirmer manuellement.
+
+## Detection OpenCV
+
+L'application utilise :
+
+- HSV pour isoler les textes colores sur fond sombre
+- connected components pour detecter les groupes de pixels
+- regroupement de blocs proches pour compter des groupes de chiffres
+- classification de la couleur dominante de chaque bloc
+
+Si la couleur dominante est bleue, le bloc est compte en `Bleu`. Sinon il est compte en `Autres couleurs`.
+
+## Historique et export
+
+Le tableau `Historique enregistre` contient :
+
+- `scan_id`
+- `datetime`
+- `source`
+- `bleu`
+- `autres_couleurs`
+- `total`
+- `pourcentage_bleu`
+- `pourcentage_autres`
+
+Vous pouvez supprimer la derniere entree, vider l'historique ou exporter le CSV.
+
+## Limites
+
+- L'application analyse seulement les resultats passes.
+- Elle ne predit pas le prochain tour.
+- Elle ne garantit aucun gain.
+- Les jeux de crash ont normalement des tours independants.
 - Elle ne doit pas automatiser les paris.
+- Elle ne gere pas d'argent reel.
+- Si l'URL est bloquee, utilisez le scan ecran local.
+- Le systeme anti-doublon evite d'ajouter plusieurs fois le meme scan identique, mais une page qui bouge ou se decale peut produire une nouvelle signature.
