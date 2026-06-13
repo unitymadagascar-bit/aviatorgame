@@ -213,6 +213,21 @@ def crop_by_percent(
     return image.crop((left, top, right, bottom))
 
 
+def box_by_percent(
+    image: Image.Image,
+    left_pct: int,
+    top_pct: int,
+    width_pct: int,
+    height_pct: int,
+) -> tuple[int, int, int, int]:
+    img_width, img_height = image.size
+    left = max(0, min(img_width - 1, int(img_width * left_pct / 100)))
+    top = max(0, min(img_height - 1, int(img_height * top_pct / 100)))
+    right = min(img_width, left + max(1, int(img_width * width_pct / 100)))
+    bottom = min(img_height, top + max(1, int(img_height * height_pct / 100)))
+    return left, top, right, bottom
+
+
 def image_hash(image: Image.Image) -> str:
     gray = image.convert("L").resize((32, 16))
     pixels = np.array(gray)
@@ -222,41 +237,71 @@ def image_hash(image: Image.Image) -> str:
     return packed.tobytes().hex()
 
 
-def selected_latest_candidate(
-    result: dict,
-    latest_position: str,
-) -> tuple[str, tuple[int, int, int, int]] | None:
-    candidates = [("blue", box) for box in result["blue_boxes"]]
-    candidates += [("other", box) for box in result["other_boxes"]]
+def classify_target_zone(
+    image: Image.Image,
+    target_box: tuple[int, int, int, int],
+    hsv_low: tuple[int, int, int],
+    hsv_high: tuple[int, int, int],
+    min_saturation: int,
+    min_value: int,
+) -> tuple[str | None, str, dict]:
+    target_crop = image.crop(target_box)
+    rgb = np.array(target_crop)
+    if rgb.size == 0:
+        return None, "La zone du dernier tour est vide.", {}
 
-    if not candidates:
-        return None
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    blue_mask = cv2.inRange(hsv, np.array(hsv_low), np.array(hsv_high))
+    colored_mask = cv2.inRange(
+        hsv,
+        np.array((0, min_saturation, min_value)),
+        np.array((179, 255, 255)),
+    )
 
-    if latest_position == "Gauche":
-        return min(candidates, key=lambda item: (item[1][0], item[1][1]))
-    if latest_position == "Droite":
-        return max(candidates, key=lambda item: (item[1][2], -item[1][1]))
-    if latest_position == "Haut":
-        return min(candidates, key=lambda item: (item[1][1], item[1][0]))
-    return max(candidates, key=lambda item: (item[1][3], item[1][0]))
+    blue_pixels = int(np.count_nonzero(blue_mask))
+    colored_pixels = int(np.count_nonzero(colored_mask))
+    other_pixels = max(0, colored_pixels - blue_pixels)
+    diagnostics = {
+        "blue_pixels": blue_pixels,
+        "colored_pixels": colored_pixels,
+        "other_pixels": other_pixels,
+        "blue_ratio": blue_pixels / colored_pixels if colored_pixels else 0.0,
+    }
+
+    if colored_pixels < 8:
+        return None, "Aucune couleur lisible dans la zone du dernier tour. Ajustez le rectangle jaune.", diagnostics
+
+    if diagnostics["blue_ratio"] >= 0.4:
+        return "blue", "", diagnostics
+
+    return "other", "", diagnostics
 
 
-def update_url_session_counter(
+def update_url_session_from_target_zone(
     image: Image.Image,
     result: dict,
-    latest_position: str,
+    target_box: tuple[int, int, int, int],
+    hsv_low: tuple[int, int, int],
+    hsv_high: tuple[int, int, int],
+    min_saturation: int,
+    min_value: int,
     min_seconds_between_rounds: int,
 ) -> tuple[dict, str]:
-    candidate = selected_latest_candidate(result, latest_position)
-    if candidate is None:
-        return session_result_from_visible(result), "Aucun multiplicateur detecte dans la zone historique URL."
+    category, warning, diagnostics = classify_target_zone(
+        image,
+        target_box,
+        hsv_low,
+        hsv_high,
+        min_saturation,
+        min_value,
+    )
+    result["target_box"] = target_box
+    result["target_diagnostics"] = diagnostics
 
-    category, box = candidate
-    left = max(0, box[0] - 4)
-    top = max(0, box[1] - 4)
-    right = min(image.width, box[2] + 4)
-    bottom = min(image.height, box[3] + 4)
-    round_crop = image.crop((left, top, right, bottom))
+    if category is None:
+        return session_result_from_visible(result), warning
+
+    round_crop = image.crop(target_box)
     round_signature = f"{category}:{image_hash(round_crop)}"
     now = time.time()
 
@@ -282,7 +327,7 @@ def update_url_session_counter(
                 {
                     "datetime": result["datetime"],
                     "categorie": category_label,
-                    "position": latest_position,
+                    "source": "zone_dernier_tour",
                 }
             )
             st.session_state.url_last_round_time = now
@@ -392,7 +437,37 @@ def detect_colored_multipliers(
 
     blue_boxes = find_grouped_boxes(blue_mask, min_area, merge_distance)
     other_boxes = find_grouped_boxes(other_mask, min_area, merge_distance)
+    blue_boxes = filter_multiplier_text_boxes(blue_boxes, image.size)
+    other_boxes = filter_multiplier_text_boxes(other_boxes, image.size)
     return blue_boxes, other_boxes
+
+
+def filter_multiplier_text_boxes(
+    boxes: list[tuple[int, int, int, int]],
+    image_size: tuple[int, int],
+) -> list[tuple[int, int, int, int]]:
+    image_width, image_height = image_size
+    filtered = []
+
+    for box in boxes:
+        width = box[2] - box[0]
+        height = box[3] - box[1]
+        area = width * height
+
+        if width < 4 or height < 4:
+            continue
+        if width > min(110, image_width * 0.18):
+            continue
+        if height > min(28, image_height * 0.35):
+            continue
+        if area > 2200:
+            continue
+        if width / max(height, 1) > 9:
+            continue
+
+        filtered.append(box)
+
+    return filtered
 
 
 def parse_amount(raw_value: str) -> float | None:
@@ -489,10 +564,13 @@ def add_debug_rectangles(
     blue_boxes: list[tuple[int, int, int, int]],
     other_boxes: list[tuple[int, int, int, int]],
     gain_boxes: list[tuple[int, int, int, int]],
+    target_box: tuple[int, int, int, int] | None = None,
 ) -> Image.Image:
     debug_image = image.copy()
     draw = ImageDraw.Draw(debug_image)
 
+    if target_box is not None:
+        draw.rectangle(target_box, outline="#eab308", width=4)
     for box in blue_boxes:
         draw.rectangle(box, outline="#2563eb", width=3)
     for box in other_boxes:
@@ -679,11 +757,6 @@ url_interval = url_settings[0].slider("Intervalle URL (secondes)", 1, 15, 3)
 url_wait = url_settings[1].slider("Attente chargement (secondes)", 1, 20, 6)
 url_width = url_settings[2].number_input("Largeur navigateur", min_value=600, value=1365, step=50)
 url_height = url_settings[3].number_input("Hauteur navigateur", min_value=400, value=768, step=50)
-url_latest_position = st.selectbox(
-    "Ou apparait le dernier tour dans l'historique ?",
-    ["Gauche", "Droite", "Haut", "Bas"],
-    index=0,
-)
 url_min_round_gap = st.slider("Temps minimum entre deux tours detectes (secondes)", 2, 20, 6)
 show_url_browser = st.checkbox(
     "Afficher le navigateur pour connexion/verifications manuelles",
@@ -696,10 +769,21 @@ with st.expander("Zone historique URL a analyser", expanded=False):
         "ou les anciens multiplicateurs sont affiches."
     )
     crop_cols = st.columns(4)
-    url_crop_left = crop_cols[0].slider("Gauche %", 0, 95, 0)
-    url_crop_top = crop_cols[1].slider("Haut %", 0, 95, 0)
-    url_crop_width = crop_cols[2].slider("Largeur %", 5, 100, 100)
-    url_crop_height = crop_cols[3].slider("Hauteur %", 5, 100, 45)
+    url_crop_left = crop_cols[0].slider("Gauche %", 0, 95, 2)
+    url_crop_top = crop_cols[1].slider("Haut %", 0, 95, 15)
+    url_crop_width = crop_cols[2].slider("Largeur %", 5, 100, 96)
+    url_crop_height = crop_cols[3].slider("Hauteur %", 5, 100, 16)
+
+with st.expander("Dernier tour a suivre", expanded=True):
+    st.caption(
+        "Placez le rectangle jaune sur le multiplicateur le plus recent dans l'historique. "
+        "Sur Bet261/Aviator, il est generalement tout a gauche de la bande HISTORIQUE DE LA MANCHE."
+    )
+    target_cols = st.columns(4)
+    url_target_left = target_cols[0].slider("Dernier gauche %", 0, 95, 2)
+    url_target_top = target_cols[1].slider("Dernier haut %", 0, 95, 42)
+    url_target_width = target_cols[2].slider("Dernier largeur %", 1, 40, 8)
+    url_target_height = target_cols[3].slider("Dernier hauteur %", 1, 60, 24)
 
 url_action_cols = st.columns(2)
 url_action_cols[0].button(
@@ -740,10 +824,21 @@ if st.session_state.url_scan_running:
             merge_distance,
         )
         previous_session_total = st.session_state.url_session_total
-        result, session_message = update_url_session_counter(
+        target_box = box_by_percent(
+            snapshot,
+            url_target_left,
+            url_target_top,
+            url_target_width,
+            url_target_height,
+        )
+        result, session_message = update_url_session_from_target_zone(
             snapshot,
             result,
-            url_latest_position,
+            target_box,
+            (hue_min, sat_min, val_min),
+            (hue_max, sat_max, val_max),
+            min_saturation,
+            min_value,
             url_min_round_gap,
         )
         if result["total"] != previous_session_total:
@@ -866,6 +961,7 @@ else:
             result["blue_boxes"],
             result["other_boxes"],
             result["gain_boxes"],
+            result.get("target_box"),
         )
         if debug_mode
         else image
@@ -883,9 +979,18 @@ else:
     else:
         st.header("Comptage des couleurs visibles")
     metric_cols = st.columns(5)
-    metric_cols[0].metric("Nombre de bleus", result["blue"])
-    metric_cols[1].metric("Nombre d'autres couleurs", result["other"])
-    metric_cols[2].metric("Total tours visibles", result["total"])
+    if st.session_state.last_analysis_source == "url":
+        blue_label = "Bleus depuis demarrage"
+        other_label = "Autres depuis demarrage"
+        total_label = "Total depuis demarrage"
+    else:
+        blue_label = "Nombre de bleus"
+        other_label = "Nombre d'autres couleurs"
+        total_label = "Total tours visibles"
+
+    metric_cols[0].metric(blue_label, result["blue"])
+    metric_cols[1].metric(other_label, result["other"])
+    metric_cols[2].metric(total_label, result["total"])
     metric_cols[3].metric("Pourcentage bleu", f"{result['blue_pct']:.2f}%")
     metric_cols[4].metric("Pourcentage autres couleurs", f"{result['other_pct']:.2f}%")
 
@@ -893,6 +998,16 @@ else:
         st.subheader("Tours detectes depuis le demarrage URL")
         events_df = pd.DataFrame(st.session_state.url_round_events[-20:])
         st.dataframe(events_df, use_container_width=True, hide_index=True)
+
+    if st.session_state.last_analysis_source == "url" and debug_mode:
+        diagnostics = result.get("target_diagnostics", {})
+        if diagnostics:
+            st.caption(
+                "Debug dernier tour : "
+                f"pixels bleus={diagnostics.get('blue_pixels', 0)}, "
+                f"pixels colores={diagnostics.get('colored_pixels', 0)}, "
+                f"ratio bleu={diagnostics.get('blue_ratio', 0):.2f}"
+            )
 
     st.header("Estimation empirique basee sur l'historique visible")
     st.write(f"Bleu : {result['blue_pct']:.2f}%")

@@ -52,7 +52,10 @@ streamlit run app.py
 4. Cliquer sur `Demarrer l'analyse URL`.
 5. Le premier scan sert de point de depart.
 6. L'application compte ensuite seulement les nouveaux tours detectes apres ce point.
-7. Si les resultats semblent faux, ouvrir `Zone historique URL a analyser` et reduire la zone pour garder uniquement l'historique des multiplicateurs.
+7. Ouvrir `Dernier tour a suivre` et placer le rectangle jaune sur le multiplicateur le plus recent.
+8. Sur Bet261/Aviator, ce multiplicateur est generalement le premier chiffre a gauche dans `HISTORIQUE DE LA MANCHE`.
+9. Activer `Mode debug` pour verifier que le rectangle jaune couvre bien ce chiffre, pas l'avion, le graphe ou les boutons.
+10. Si la bande d'historique n'est pas bien cadree, ouvrir `Zone historique URL a analyser` et reduire la zone pour garder uniquement l'historique des multiplicateurs.
 
 Ce mode observe seulement la page. Il ne clique pas, ne se connecte pas automatiquement et ne place aucune mise.
 
