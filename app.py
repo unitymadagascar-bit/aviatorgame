@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +14,15 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw, ImageGrab
+
+try:
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    PlaywrightError = Exception
+    PlaywrightTimeoutError = Exception
+    sync_playwright = None
 
 try:
     import pytesseract
@@ -32,6 +42,8 @@ AMOUNT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+DEFAULT_GAME_URL = "https://bet261.mg/instant-games/llc/Aviator?categoryId=18"
+
 
 def init_state() -> None:
     defaults = {
@@ -40,6 +52,11 @@ def init_state() -> None:
         "last_result": None,
         "last_image": None,
         "last_error": "",
+        "url_scan_running": False,
+        "url_playwright": None,
+        "url_browser": None,
+        "url_page": None,
+        "url_current": "",
     }
 
     for key, value in defaults.items():
@@ -49,14 +66,46 @@ def init_state() -> None:
 
 def start_scan() -> None:
     st.session_state.scan_running = True
+    st.session_state.url_scan_running = False
 
 
 def stop_scan() -> None:
     st.session_state.scan_running = False
 
 
+def start_url_scan() -> None:
+    st.session_state.url_scan_running = True
+    st.session_state.scan_running = False
+
+
+def stop_url_scan() -> None:
+    st.session_state.url_scan_running = False
+    close_url_browser()
+
+
 def clear_history() -> None:
     st.session_state.history = []
+
+
+def close_url_browser() -> None:
+    for key in ("url_page", "url_browser"):
+        resource = st.session_state.get(key)
+        if resource is not None:
+            try:
+                resource.close()
+            except Exception:
+                pass
+            st.session_state[key] = None
+
+    playwright_runtime = st.session_state.get("url_playwright")
+    if playwright_runtime is not None:
+        try:
+            playwright_runtime.stop()
+        except Exception:
+            pass
+        st.session_state.url_playwright = None
+
+    st.session_state.url_current = ""
 
 
 def read_clipboard_image() -> tuple[Image.Image | None, str]:
@@ -86,6 +135,50 @@ def capture_screen_region(x: int, y: int, width: int, height: int) -> Image.Imag
     frame = np.array(screenshot)
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
     return Image.fromarray(rgb_frame)
+
+
+def ensure_url_page(
+    url: str,
+    show_browser: bool,
+    viewport_width: int,
+    viewport_height: int,
+    initial_wait_seconds: int,
+):
+    if sync_playwright is None:
+        raise RuntimeError(
+            "Playwright n'est pas installe. Lancez : pip install -r requirements.txt puis python -m playwright install chromium"
+        )
+
+    page = st.session_state.get("url_page")
+    browser = st.session_state.get("url_browser")
+    if page is not None and browser is not None and st.session_state.url_current == url:
+        return page
+
+    close_url_browser()
+
+    playwright_runtime = sync_playwright().start()
+    browser = playwright_runtime.chromium.launch(headless=not show_browser)
+    page = browser.new_page(viewport={"width": viewport_width, "height": viewport_height})
+    page.goto(url, wait_until="domcontentloaded", timeout=45000)
+    page.wait_for_timeout(initial_wait_seconds * 1000)
+
+    st.session_state.url_playwright = playwright_runtime
+    st.session_state.url_browser = browser
+    st.session_state.url_page = page
+    st.session_state.url_current = url
+    return page
+
+
+def capture_url_page(
+    url: str,
+    show_browser: bool,
+    viewport_width: int,
+    viewport_height: int,
+    initial_wait_seconds: int,
+) -> Image.Image:
+    page = ensure_url_page(url, show_browser, viewport_width, viewport_height, initial_wait_seconds)
+    screenshot = page.screenshot(full_page=False)
+    return Image.open(BytesIO(screenshot)).convert("RGB")
 
 
 def find_grouped_boxes(mask: np.ndarray, min_area: int, merge_distance: int) -> list[tuple[int, int, int, int]]:
@@ -372,6 +465,7 @@ def store_analysis(image: Image.Image, result: dict) -> None:
     st.session_state.last_result = result
     st.session_state.last_error = ""
     st.session_state.scan_running = False
+    st.session_state.url_scan_running = False
 
 
 def append_history(result: dict) -> None:
@@ -447,6 +541,81 @@ with st.sidebar:
     stop_col.button("Arreter le scan", on_click=stop_scan)
     st.button("Vider l'historique", on_click=clear_history)
 
+st.header("Mode automatique : scanner depuis une URL")
+st.write(
+    "Ce mode ouvre la page localement, prend une capture regulierement, puis analyse "
+    "ce qui est visible. Il n'automatise aucun clic, aucune connexion et aucune mise."
+)
+
+url_value = st.text_input("URL du site", value=DEFAULT_GAME_URL)
+url_settings = st.columns(4)
+url_interval = url_settings[0].slider("Intervalle URL (secondes)", 1, 15, 3)
+url_wait = url_settings[1].slider("Attente chargement (secondes)", 1, 20, 6)
+url_width = url_settings[2].number_input("Largeur navigateur", min_value=600, value=1365, step=50)
+url_height = url_settings[3].number_input("Hauteur navigateur", min_value=400, value=768, step=50)
+show_url_browser = st.checkbox(
+    "Afficher le navigateur pour connexion/verifications manuelles",
+    value=True,
+)
+
+url_action_cols = st.columns(2)
+url_action_cols[0].button(
+    "Demarrer l'analyse URL",
+    type="primary",
+    use_container_width=True,
+    on_click=start_url_scan,
+)
+url_action_cols[1].button(
+    "Arreter l'analyse URL",
+    use_container_width=True,
+    on_click=stop_url_scan,
+)
+
+if st.session_state.url_scan_running:
+    try:
+        snapshot = capture_url_page(
+            url_value,
+            show_url_browser,
+            int(url_width),
+            int(url_height),
+            int(url_wait),
+        )
+        result = analyze_snapshot(
+            snapshot,
+            (hue_min, sat_min, val_min),
+            (hue_max, sat_max, val_max),
+            min_saturation,
+            min_value,
+            min_area,
+            merge_distance,
+        )
+        append_history(result)
+        st.session_state.last_image = snapshot
+        st.session_state.last_result = result
+        st.session_state.last_error = ""
+        st.info(f"Dernier scan URL : {result['datetime']}")
+    except PlaywrightTimeoutError:
+        st.session_state.last_error = (
+            "La page a mis trop longtemps a charger. Si le site demande une connexion, "
+            "activez l'affichage du navigateur, connectez-vous manuellement, puis relancez."
+        )
+        st.session_state.url_scan_running = False
+        close_url_browser()
+    except PlaywrightError as exc:
+        st.session_state.last_error = (
+            "Playwright ne peut pas ouvrir ou capturer la page. "
+            "Installez Chromium avec : python -m playwright install chromium. "
+            f"Detail : {exc}"
+        )
+        st.session_state.url_scan_running = False
+        close_url_browser()
+    except Exception as exc:
+        st.session_state.last_error = f"Analyse URL impossible : {exc}"
+        st.session_state.url_scan_running = False
+        close_url_browser()
+
+st.divider()
+
 st.header("Mode simple : coller une capture")
 st.write("Faites `PrtSc` ou `Win + Shift + S`, puis cliquez sur le bouton ci-dessous.")
 
@@ -520,7 +689,8 @@ if st.session_state.last_error:
     st.error(st.session_state.last_error)
 
 scan_state = "actif" if st.session_state.scan_running else "arrete"
-st.caption(f"Etat du scan : {scan_state}")
+url_scan_state = "actif" if st.session_state.url_scan_running else "arrete"
+st.caption(f"Etat scan ecran : {scan_state} | Etat analyse URL : {url_scan_state}")
 
 result = st.session_state.last_result
 image = st.session_state.last_image
@@ -595,6 +765,9 @@ if st.session_state.history:
 else:
     st.caption("Aucun snapshot enregistre pour le moment.")
 
-if st.session_state.scan_running:
+if st.session_state.url_scan_running:
+    time.sleep(url_interval)
+    st.rerun()
+elif st.session_state.scan_running:
     time.sleep(interval)
     st.rerun()

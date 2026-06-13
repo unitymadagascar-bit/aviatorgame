@@ -10,6 +10,7 @@ Important : l'application ne predit pas le prochain tour, ne garantit aucun gain
 
 ```bash
 pip install -r requirements.txt
+python -m playwright install chromium
 ```
 
 ## Lancement local
@@ -42,6 +43,16 @@ streamlit run app.py
 2. Entrer les coordonnees `x`, `y`, `largeur`, `hauteur` de la zone a scanner.
 3. Cliquer sur `Demarrer le scan`.
 4. Ajuster les sliders HSV si necessaire.
+
+### Methode automatique : scanner depuis une URL
+
+1. Lancer l'application en local.
+2. Coller l'URL du site dans `URL du site`.
+3. Garder `Afficher le navigateur` active si le site demande une connexion ou une verification manuelle.
+4. Cliquer sur `Demarrer l'analyse URL`.
+5. L'application prend une capture reguliere de la page et met les resultats a jour.
+
+Ce mode observe seulement la page. Il ne clique pas, ne se connecte pas automatiquement et ne place aucune mise.
 
 ## Deploiement recommande
 
@@ -90,11 +101,23 @@ Il ne faut pas transformer `app.py` en fonction API Vercel.
 - En local, installer Tesseract OCR puis verifier qu'il est disponible dans le `PATH`.
 - Si Tesseract est trop complique a installer, `easyocr` peut etre envisage comme alternative dans une version future.
 
+## Playwright
+
+Le mode `Scanner depuis une URL` utilise Playwright pour ouvrir la page et prendre des captures.
+
+Apres l'installation Python, lancer une fois :
+
+```bash
+python -m playwright install chromium
+```
+
 ## Limites importantes
 
 - L'application analyse seulement ce qui est visible sur l'ecran.
 - Sur un hebergement cloud, le serveur ne peut pas voir l'ecran local de l'utilisateur comme une application lancee sur son ordinateur.
 - Le mode `Coller depuis le presse-papiers` et le scan live sont donc surtout adaptes a une execution locale.
+- Le mode URL depend du chargement du site. Si le site bloque l'automatisation, demande un captcha ou une connexion, il faut verifier manuellement dans le navigateur ouvert.
+- L'application ne doit pas contourner les protections du site.
 - Les donnees OCR peuvent contenir des erreurs.
 - Les tours d'un crash game sont normalement independants.
 - L'application ne predit pas le prochain tour.
