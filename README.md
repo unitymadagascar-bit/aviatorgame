@@ -50,7 +50,9 @@ streamlit run app.py
 2. Coller l'URL du site dans `URL du site`.
 3. Garder `Afficher le navigateur` active si le site demande une connexion ou une verification manuelle.
 4. Cliquer sur `Demarrer l'analyse URL`.
-5. L'application prend une capture reguliere de la page et met les resultats a jour.
+5. Le premier scan sert de point de depart.
+6. L'application compte ensuite seulement les nouveaux tours detectes apres ce point.
+7. Si les resultats semblent faux, ouvrir `Zone historique URL a analyser` et reduire la zone pour garder uniquement l'historique des multiplicateurs.
 
 Ce mode observe seulement la page. Il ne clique pas, ne se connecte pas automatiquement et ne place aucune mise.
 

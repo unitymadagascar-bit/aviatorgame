@@ -57,6 +57,13 @@ def init_state() -> None:
         "url_browser": None,
         "url_page": None,
         "url_current": "",
+        "url_session_blue": 0,
+        "url_session_other": 0,
+        "url_session_total": 0,
+        "url_last_round_signature": "",
+        "url_last_round_time": 0.0,
+        "url_round_events": [],
+        "last_analysis_source": "",
     }
 
     for key, value in defaults.items():
@@ -74,6 +81,7 @@ def stop_scan() -> None:
 
 
 def start_url_scan() -> None:
+    reset_url_session()
     st.session_state.url_scan_running = True
     st.session_state.scan_running = False
 
@@ -85,6 +93,15 @@ def stop_url_scan() -> None:
 
 def clear_history() -> None:
     st.session_state.history = []
+
+
+def reset_url_session() -> None:
+    st.session_state.url_session_blue = 0
+    st.session_state.url_session_other = 0
+    st.session_state.url_session_total = 0
+    st.session_state.url_last_round_signature = ""
+    st.session_state.url_last_round_time = 0.0
+    st.session_state.url_round_events = []
 
 
 def close_url_browser() -> None:
@@ -179,6 +196,114 @@ def capture_url_page(
     page = ensure_url_page(url, show_browser, viewport_width, viewport_height, initial_wait_seconds)
     screenshot = page.screenshot(full_page=False)
     return Image.open(BytesIO(screenshot)).convert("RGB")
+
+
+def crop_by_percent(
+    image: Image.Image,
+    left_pct: int,
+    top_pct: int,
+    width_pct: int,
+    height_pct: int,
+) -> Image.Image:
+    img_width, img_height = image.size
+    left = int(img_width * left_pct / 100)
+    top = int(img_height * top_pct / 100)
+    right = min(img_width, left + int(img_width * width_pct / 100))
+    bottom = min(img_height, top + int(img_height * height_pct / 100))
+    return image.crop((left, top, right, bottom))
+
+
+def image_hash(image: Image.Image) -> str:
+    gray = image.convert("L").resize((32, 16))
+    pixels = np.array(gray)
+    threshold = pixels.mean()
+    bits = pixels > threshold
+    packed = np.packbits(bits.astype(np.uint8))
+    return packed.tobytes().hex()
+
+
+def selected_latest_candidate(
+    result: dict,
+    latest_position: str,
+) -> tuple[str, tuple[int, int, int, int]] | None:
+    candidates = [("blue", box) for box in result["blue_boxes"]]
+    candidates += [("other", box) for box in result["other_boxes"]]
+
+    if not candidates:
+        return None
+
+    if latest_position == "Gauche":
+        return min(candidates, key=lambda item: (item[1][0], item[1][1]))
+    if latest_position == "Droite":
+        return max(candidates, key=lambda item: (item[1][2], -item[1][1]))
+    if latest_position == "Haut":
+        return min(candidates, key=lambda item: (item[1][1], item[1][0]))
+    return max(candidates, key=lambda item: (item[1][3], item[1][0]))
+
+
+def update_url_session_counter(
+    image: Image.Image,
+    result: dict,
+    latest_position: str,
+    min_seconds_between_rounds: int,
+) -> tuple[dict, str]:
+    candidate = selected_latest_candidate(result, latest_position)
+    if candidate is None:
+        return session_result_from_visible(result), "Aucun multiplicateur detecte dans la zone historique URL."
+
+    category, box = candidate
+    left = max(0, box[0] - 4)
+    top = max(0, box[1] - 4)
+    right = min(image.width, box[2] + 4)
+    bottom = min(image.height, box[3] + 4)
+    round_crop = image.crop((left, top, right, bottom))
+    round_signature = f"{category}:{image_hash(round_crop)}"
+    now = time.time()
+
+    if not st.session_state.url_last_round_signature:
+        st.session_state.url_last_round_signature = round_signature
+        st.session_state.url_last_round_time = now
+        return session_result_from_visible(result), (
+            "Point de depart enregistre. Le compteur commencera au prochain nouveau tour detecte."
+        )
+
+    if round_signature != st.session_state.url_last_round_signature:
+        elapsed = now - float(st.session_state.url_last_round_time or 0)
+        if elapsed >= min_seconds_between_rounds:
+            if category == "blue":
+                st.session_state.url_session_blue += 1
+                category_label = "Bleu"
+            else:
+                st.session_state.url_session_other += 1
+                category_label = "Autres couleurs"
+
+            st.session_state.url_session_total += 1
+            st.session_state.url_round_events.append(
+                {
+                    "datetime": result["datetime"],
+                    "categorie": category_label,
+                    "position": latest_position,
+                }
+            )
+            st.session_state.url_last_round_time = now
+
+        st.session_state.url_last_round_signature = round_signature
+
+    return session_result_from_visible(result), ""
+
+
+def session_result_from_visible(result: dict) -> dict:
+    session_result = dict(result)
+    total, blue_pct, other_pct = compute_percentages(
+        st.session_state.url_session_blue,
+        st.session_state.url_session_other,
+    )
+    session_result["blue"] = st.session_state.url_session_blue
+    session_result["other"] = st.session_state.url_session_other
+    session_result["total"] = total
+    session_result["blue_pct"] = blue_pct
+    session_result["other_pct"] = other_pct
+    return session_result
 
 
 def find_grouped_boxes(mask: np.ndarray, min_area: int, merge_distance: int) -> list[tuple[int, int, int, int]]:
@@ -466,6 +591,7 @@ def store_analysis(image: Image.Image, result: dict) -> None:
     st.session_state.last_error = ""
     st.session_state.scan_running = False
     st.session_state.url_scan_running = False
+    st.session_state.last_analysis_source = "image"
 
 
 def append_history(result: dict) -> None:
@@ -553,10 +679,27 @@ url_interval = url_settings[0].slider("Intervalle URL (secondes)", 1, 15, 3)
 url_wait = url_settings[1].slider("Attente chargement (secondes)", 1, 20, 6)
 url_width = url_settings[2].number_input("Largeur navigateur", min_value=600, value=1365, step=50)
 url_height = url_settings[3].number_input("Hauteur navigateur", min_value=400, value=768, step=50)
+url_latest_position = st.selectbox(
+    "Ou apparait le dernier tour dans l'historique ?",
+    ["Gauche", "Droite", "Haut", "Bas"],
+    index=0,
+)
+url_min_round_gap = st.slider("Temps minimum entre deux tours detectes (secondes)", 2, 20, 6)
 show_url_browser = st.checkbox(
     "Afficher le navigateur pour connexion/verifications manuelles",
     value=True,
 )
+
+with st.expander("Zone historique URL a analyser", expanded=False):
+    st.caption(
+        "Si les chiffres semblent faux, reduisez cette zone pour garder seulement la bande "
+        "ou les anciens multiplicateurs sont affiches."
+    )
+    crop_cols = st.columns(4)
+    url_crop_left = crop_cols[0].slider("Gauche %", 0, 95, 0)
+    url_crop_top = crop_cols[1].slider("Haut %", 0, 95, 0)
+    url_crop_width = crop_cols[2].slider("Largeur %", 5, 100, 100)
+    url_crop_height = crop_cols[3].slider("Hauteur %", 5, 100, 45)
 
 url_action_cols = st.columns(2)
 url_action_cols[0].button(
@@ -573,12 +716,19 @@ url_action_cols[1].button(
 
 if st.session_state.url_scan_running:
     try:
-        snapshot = capture_url_page(
+        full_snapshot = capture_url_page(
             url_value,
             show_url_browser,
             int(url_width),
             int(url_height),
             int(url_wait),
+        )
+        snapshot = crop_by_percent(
+            full_snapshot,
+            url_crop_left,
+            url_crop_top,
+            url_crop_width,
+            url_crop_height,
         )
         result = analyze_snapshot(
             snapshot,
@@ -589,11 +739,22 @@ if st.session_state.url_scan_running:
             min_area,
             merge_distance,
         )
-        append_history(result)
+        previous_session_total = st.session_state.url_session_total
+        result, session_message = update_url_session_counter(
+            snapshot,
+            result,
+            url_latest_position,
+            url_min_round_gap,
+        )
+        if result["total"] != previous_session_total:
+            append_history(result)
         st.session_state.last_image = snapshot
         st.session_state.last_result = result
         st.session_state.last_error = ""
+        st.session_state.last_analysis_source = "url"
         st.info(f"Dernier scan URL : {result['datetime']}")
+        if session_message:
+            st.warning(session_message)
     except PlaywrightTimeoutError:
         st.session_state.last_error = (
             "La page a mis trop longtemps a charger. Si le site demande une connexion, "
@@ -681,6 +842,7 @@ if st.session_state.scan_running:
         st.session_state.last_image = snapshot
         st.session_state.last_result = result
         st.session_state.last_error = ""
+        st.session_state.last_analysis_source = "screen"
     except Exception as exc:
         st.session_state.last_error = f"Scan impossible : {exc}"
         st.session_state.scan_running = False
@@ -712,13 +874,25 @@ else:
     st.header("Zone scannee")
     st.image(display_image, caption="Derniere capture analysee", use_container_width=True)
 
-    st.header("Comptage des couleurs")
+    if st.session_state.last_analysis_source == "url":
+        st.header("Comptage depuis le demarrage de l'analyse URL")
+        st.caption(
+            "Le premier scan sert de point de depart. Les nombres augmentent seulement "
+            "quand un nouveau tour est detecte apres ce point."
+        )
+    else:
+        st.header("Comptage des couleurs visibles")
     metric_cols = st.columns(5)
     metric_cols[0].metric("Nombre de bleus", result["blue"])
     metric_cols[1].metric("Nombre d'autres couleurs", result["other"])
     metric_cols[2].metric("Total tours visibles", result["total"])
     metric_cols[3].metric("Pourcentage bleu", f"{result['blue_pct']:.2f}%")
     metric_cols[4].metric("Pourcentage autres couleurs", f"{result['other_pct']:.2f}%")
+
+    if st.session_state.last_analysis_source == "url" and st.session_state.url_round_events:
+        st.subheader("Tours detectes depuis le demarrage URL")
+        events_df = pd.DataFrame(st.session_state.url_round_events[-20:])
+        st.dataframe(events_df, use_container_width=True, hide_index=True)
 
     st.header("Estimation empirique basee sur l'historique visible")
     st.write(f"Bleu : {result['blue_pct']:.2f}%")
