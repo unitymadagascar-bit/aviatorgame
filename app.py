@@ -12,7 +12,7 @@ import mss
 import numpy as np
 import pandas as pd
 import streamlit as st
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageGrab
 
 try:
     import pytesseract
@@ -57,6 +57,25 @@ def stop_scan() -> None:
 
 def clear_history() -> None:
     st.session_state.history = []
+
+
+def read_clipboard_image() -> tuple[Image.Image | None, str]:
+    try:
+        clipboard_content = ImageGrab.grabclipboard()
+    except Exception as exc:
+        return None, f"Impossible de lire le presse-papiers : {exc}"
+
+    if isinstance(clipboard_content, Image.Image):
+        return clipboard_content.convert("RGB"), ""
+
+    if isinstance(clipboard_content, list) and clipboard_content:
+        first_file = clipboard_content[0]
+        try:
+            return Image.open(first_file).convert("RGB"), ""
+        except Exception as exc:
+            return None, f"Le fichier du presse-papiers n'est pas une image lisible : {exc}"
+
+    return None, "Aucune image trouvee dans le presse-papiers. Faites PrtSc ou Win+Shift+S, puis reessayez."
 
 
 def capture_screen_region(x: int, y: int, width: int, height: int) -> Image.Image:
@@ -347,6 +366,14 @@ def analyze_snapshot(
     }
 
 
+def store_analysis(image: Image.Image, result: dict) -> None:
+    append_history(result)
+    st.session_state.last_image = image
+    st.session_state.last_result = result
+    st.session_state.last_error = ""
+    st.session_state.scan_running = False
+
+
 def append_history(result: dict) -> None:
     st.session_state.history.append(
         {
@@ -391,15 +418,10 @@ with st.expander("Limites importantes", expanded=True):
     )
 
 with st.sidebar:
-    st.header("Zone a scanner")
-    screen_x = st.number_input("x", min_value=0, value=0, step=10)
-    screen_y = st.number_input("y", min_value=0, value=0, step=10)
-    screen_width = st.number_input("largeur", min_value=50, value=900, step=10)
-    screen_height = st.number_input("hauteur", min_value=50, value=500, step=10)
-    interval = st.slider("Intervalle de scan (secondes)", 1, 10, 2)
+    st.header("Calibration")
     debug_mode = st.checkbox("Mode debug", value=False)
 
-    st.header("Calibration bleu HSV")
+    st.subheader("Bleu HSV")
     hue_min = st.slider("Hue bleu min", 0, 179, 85)
     hue_max = st.slider("Hue bleu max", 0, 179, 135)
     sat_min = st.slider("Saturation bleu min", 0, 255, 60)
@@ -407,16 +429,67 @@ with st.sidebar:
     val_min = st.slider("Valeur bleu min", 0, 255, 50)
     val_max = st.slider("Valeur bleu max", 0, 255, 255)
 
-    st.header("Sensibilite")
+    st.subheader("Sensibilite")
     min_saturation = st.slider("Saturation minimale du texte colore", 0, 255, 45)
     min_value = st.slider("Luminosite minimale du texte colore", 0, 255, 45)
     min_area = st.slider("Surface minimale detectee", 2, 600, 20)
     merge_distance = st.slider("Distance de regroupement", 1, 80, 18)
 
+    st.header("Scan live avance")
+    screen_x = st.number_input("x", min_value=0, value=0, step=10)
+    screen_y = st.number_input("y", min_value=0, value=0, step=10)
+    screen_width = st.number_input("largeur", min_value=50, value=900, step=10)
+    screen_height = st.number_input("hauteur", min_value=50, value=500, step=10)
+    interval = st.slider("Intervalle de scan (secondes)", 1, 10, 2)
+
     start_col, stop_col = st.columns(2)
     start_col.button("Demarrer le scan", type="primary", on_click=start_scan)
     stop_col.button("Arreter le scan", on_click=stop_scan)
     st.button("Vider l'historique", on_click=clear_history)
+
+st.header("Mode simple : coller une capture")
+st.write("Faites `PrtSc` ou `Win + Shift + S`, puis cliquez sur le bouton ci-dessous.")
+
+simple_cols = st.columns([1, 1])
+if simple_cols[0].button("Coller depuis le presse-papiers", type="primary", use_container_width=True):
+    clipboard_image, clipboard_error = read_clipboard_image()
+    if clipboard_error:
+        st.session_state.last_error = clipboard_error
+        st.session_state.scan_running = False
+    elif clipboard_image is not None:
+        result = analyze_snapshot(
+            clipboard_image,
+            (hue_min, sat_min, val_min),
+            (hue_max, sat_max, val_max),
+            min_saturation,
+            min_value,
+            min_area,
+            merge_distance,
+        )
+        store_analysis(clipboard_image, result)
+        st.success("Capture collee et analysee.")
+
+uploaded_image = simple_cols[1].file_uploader(
+    "Ou importer PNG/JPG",
+    type=["png", "jpg", "jpeg"],
+    label_visibility="collapsed",
+)
+
+if uploaded_image is not None and st.button("Analyser l'image importee", use_container_width=True):
+    imported_image = Image.open(uploaded_image).convert("RGB")
+    result = analyze_snapshot(
+        imported_image,
+        (hue_min, sat_min, val_min),
+        (hue_max, sat_max, val_max),
+        min_saturation,
+        min_value,
+        min_area,
+        merge_distance,
+    )
+    store_analysis(imported_image, result)
+    st.success("Image importee et analysee.")
+
+st.divider()
 
 if st.session_state.scan_running:
     try:
@@ -453,7 +526,7 @@ result = st.session_state.last_result
 image = st.session_state.last_image
 
 if image is None or result is None:
-    st.warning("Definissez la zone de l'ecran, puis cliquez sur Demarrer le scan.")
+    st.warning("Collez une capture d'ecran ou importez une image pour commencer.")
 else:
     display_image = (
         add_debug_rectangles(

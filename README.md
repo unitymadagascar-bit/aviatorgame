@@ -2,7 +2,7 @@
 
 Crash Live Screen Counter est une application Python Streamlit dont le fichier principal est `app.py`.
 
-Elle sert a analyser une zone visible de l'ecran pour compter les couleurs d'un historique de crash game et lire, si possible, des gains visibles avec OCR.
+Elle sert a analyser une capture d'ecran ou une zone visible de l'ecran pour compter les couleurs d'un historique de crash game et lire, si possible, des gains visibles avec OCR.
 
 Important : l'application ne predit pas le prochain tour, ne garantit aucun gain et ne doit pas automatiser les paris.
 
@@ -20,13 +20,28 @@ streamlit run app.py
 
 ## Utilisation
 
+### Methode simple : Print Screen puis coller
+
 1. Ouvrir la page du jeu.
-2. Lancer l'application Streamlit.
-3. Entrer les coordonnees `x`, `y`, `largeur`, `hauteur` de la zone a scanner.
-4. Cliquer sur `Demarrer le scan`.
-5. Ajuster les sliders HSV si necessaire.
-6. Activer le mode debug pour verifier les rectangles detectes.
-7. Telecharger le CSV si necessaire.
+2. Faire `PrtSc` ou `Win + Shift + S`.
+3. Revenir dans l'application Streamlit.
+4. Cliquer sur `Coller depuis le presse-papiers`.
+5. Verifier la capture affichee et les resultats.
+6. Activer le mode debug si necessaire.
+7. Telecharger le CSV si besoin.
+
+### Methode alternative : importer une image
+
+1. Enregistrer une capture d'ecran en PNG/JPG.
+2. Cliquer sur l'import d'image dans l'application.
+3. Cliquer sur `Analyser l'image importee`.
+
+### Methode avancee : scan live
+
+1. Ouvrir la page du jeu.
+2. Entrer les coordonnees `x`, `y`, `largeur`, `hauteur` de la zone a scanner.
+3. Cliquer sur `Demarrer le scan`.
+4. Ajuster les sliders HSV si necessaire.
 
 ## Deploiement recommande
 
@@ -79,7 +94,7 @@ Il ne faut pas transformer `app.py` en fonction API Vercel.
 
 - L'application analyse seulement ce qui est visible sur l'ecran.
 - Sur un hebergement cloud, le serveur ne peut pas voir l'ecran local de l'utilisateur comme une application lancee sur son ordinateur.
-- Le scan d'ecran live est donc surtout adapte a une execution locale.
+- Le mode `Coller depuis le presse-papiers` et le scan live sont donc surtout adaptes a une execution locale.
 - Les donnees OCR peuvent contenir des erreurs.
 - Les tours d'un crash game sont normalement independants.
 - L'application ne predit pas le prochain tour.
