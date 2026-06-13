@@ -28,12 +28,15 @@ Fonctionnement :
 1. Ouvrir vous-meme la page Aviator dans votre navigateur.
 2. Placer l'historique des multiplicateurs bien visible a l'ecran.
 3. Dans l'application, choisir la zone exacte a scanner avec `x`, `y`, `largeur` et `hauteur`.
-4. Cliquer sur `Tester la zone` pour verifier l'apercu.
-5. Ajuster la zone si necessaire.
-6. Cliquer sur `Demarrer scan`.
-7. Cliquer sur `Arreter scan` pour stopper le scan.
+4. Encadrer uniquement la boite `HISTORIQUE DE LA MANCHE`, pas toute la page Aviator.
+5. Cliquer sur `Tester la zone` pour verifier l'apercu.
+6. Ajuster la zone si necessaire.
+7. Cliquer sur `Demarrer scan`.
+8. Cliquer sur `Arreter scan` pour stopper le scan.
+9. Cliquer sur `Ajouter ce scan au cumul` seulement quand vous voulez enregistrer le scan actuel.
 
 Le scan utilise `mss` pour capturer directement ce qui est visible sur votre ecran, puis OpenCV analyse l'image.
+Le cumul global ne s'incremente pas automatiquement pendant les rafraichissements.
 
 ## Mode manuel de secours
 
@@ -74,8 +77,10 @@ Le cumul global garde les anciens scans meme quand ils ne sont plus visibles a l
 Chaque scan recoit une signature construite avec les blocs detectes, leurs positions et leurs couleurs.
 
 - Si le scan actuel est identique au scan precedent ajoute, il n'est pas ajoute automatiquement au cumul.
-- L'option `Ajout automatique au cumul si nouveau scan detecte` ajoute seulement les scans nouveaux.
-- Le bouton `Ajouter ce scan au cumul` permet de confirmer manuellement.
+- Le bouton `Ajouter ce scan au cumul` enregistre le scan actuel.
+- Si le scan actuel est identique au dernier scan ajoute, il n'est pas ajoute une deuxieme fois.
+- Le bouton `Reinitialiser scan actuel` efface seulement la capture et les statistiques du scan courant.
+- Le bouton `Reinitialiser cumul global` efface l'historique et les statistiques globales.
 
 ## Detection OpenCV
 
@@ -89,6 +94,7 @@ L'application utilise :
 Si la couleur dominante est bleue, le bloc est compte en `Bleu`. Sinon il est compte en `Autres couleurs`.
 
 Le mode debug affiche des rectangles autour des nombres detectes.
+Il affiche aussi le nombre exact de blocs detectes dans la zone analysee.
 
 ## Historique et export
 

@@ -34,6 +34,7 @@ def init_state() -> None:
         "manual_blue": 0,
         "manual_other": 0,
         "last_error": "",
+        "last_add_message": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -165,9 +166,17 @@ def detect_colored_text_blocks(
         width = box[2] - box[0]
         height = box[3] - box[1]
         area = width * height
-        if area < min_area or area > max_area * 6:
+        aspect_ratio = width / max(height, 1)
+
+        if area < min_area or area > max_area:
             continue
-        if width > max_width * 4 or height > max_height * 2:
+        if width < min_width or width > max_width:
+            continue
+        if height < min_height or height > max_height:
+            continue
+        if width > image.width * 0.22 or height > image.height * 0.45:
+            continue
+        if not 0.35 <= aspect_ratio <= 8.5:
             continue
 
         color = classify_block_color(hsv, box, blue_low, blue_high, min_saturation, min_value)
@@ -213,11 +222,11 @@ def build_result(source: str, image: Image.Image, blocks: list[dict]) -> dict:
     return stats
 
 
-def add_scan_to_history(result: dict, force: bool = False) -> bool:
+def add_scan_to_history(result: dict) -> bool:
     signature = result.get("signature", "")
-    if not force and result.get("total", 0) == 0:
+    if result.get("total", 0) == 0:
         return False
-    if not force and signature == st.session_state.last_added_signature:
+    if signature == st.session_state.last_added_signature:
         return False
 
     st.session_state.scan_counter += 1
@@ -235,6 +244,22 @@ def add_scan_to_history(result: dict, force: bool = False) -> bool:
     st.session_state.history.append(entry)
     st.session_state.last_added_signature = signature
     return True
+
+
+def reset_current_scan() -> None:
+    st.session_state.current_result = None
+    st.session_state.current_image = None
+    st.session_state.current_debug_image = None
+    st.session_state.current_signature = ""
+    st.session_state.last_error = ""
+    st.session_state.last_add_message = ""
+
+
+def reset_global_history() -> None:
+    st.session_state.history = []
+    st.session_state.scan_counter = 0
+    st.session_state.last_added_signature = ""
+    st.session_state.last_add_message = "Cumul global reinitialise."
 
 
 def compute_global_stats() -> dict:
@@ -364,7 +389,7 @@ with st.sidebar:
     st.header("Reglages")
     mode = st.radio("Mode", ["Scan ecran local", "Manuel"])
     debug_mode = st.checkbox("Mode debug", value=True)
-    auto_add = st.checkbox("Ajout automatique au cumul si nouveau scan detecte", value=True)
+    st.caption("Le cumul global change seulement quand vous cliquez sur `Ajouter ce scan au cumul`.")
 
     st.divider()
     st.subheader("HSV bleu")
@@ -378,12 +403,12 @@ with st.sidebar:
     min_value = st.slider("Luminosite minimale", 0, 255, 45)
     dark_background_value = st.slider("Fond sombre max", 0, 255, 95)
     min_area = st.slider("Surface min contour", 1, 500, 8)
-    max_area = st.slider("Surface max contour", 20, 5000, 900)
+    max_area = st.slider("Surface max contour", 20, 5000, 1200)
     min_width = st.slider("Largeur min bloc", 1, 80, 3)
-    max_width = st.slider("Largeur max bloc", 10, 300, 120)
+    max_width = st.slider("Largeur max bloc", 10, 300, 90)
     min_height = st.slider("Hauteur min bloc", 1, 80, 3)
-    max_height = st.slider("Hauteur max bloc", 5, 120, 32)
-    merge_distance = st.slider("Distance regroupement", 1, 80, 12)
+    max_height = st.slider("Hauteur max bloc", 5, 120, 28)
+    merge_distance = st.slider("Distance regroupement", 1, 80, 10)
 
 settings = {
     "blue_low": (hue_min, blue_sat_min, blue_val_min),
@@ -410,6 +435,7 @@ st.info(
     "Mode principal : ouvrez Aviator vous-meme dans votre navigateur, placez l'historique des "
     "multiplicateurs bien visible, puis choisissez la zone exacte a scanner."
 )
+st.warning("Reglez x, y, largeur, hauteur pour encadrer uniquement la boite HISTORIQUE DE LA MANCHE.")
 
 current_stats = st.session_state.current_result or compute_stats(0, 0)
 global_stats = compute_global_stats()
@@ -418,7 +444,8 @@ if mode == "Scan ecran local":
     st.markdown("### Mode principal - Scan ecran local")
     st.caption(
         "L'application capture directement la zone visible de votre ecran avec mss. "
-        "Elle n'ouvre aucune URL et n'utilise pas Playwright."
+        "Elle n'ouvre aucune URL et n'utilise pas Playwright. Ne cadrez pas le logo, le menu, "
+        "l'heure, les boutons de pari ou le graphique principal."
     )
     scan_cols = st.columns(5)
     screen_x = scan_cols[0].number_input("x", min_value=0, value=0, step=10)
@@ -445,8 +472,6 @@ if mode == "Scan ecran local":
         try:
             image = capture_screen_region(int(screen_x), int(screen_y), int(screen_width), int(screen_height))
             result = analyze_image("Scan ecran", image, settings)
-            if auto_add:
-                add_scan_to_history(result)
         except Exception as exc:
             st.session_state.last_error = f"Scan ecran impossible : {exc}"
             st.session_state.scan_running = False
@@ -478,9 +503,16 @@ elif mode == "Manuel":
         }
     )
     st.session_state.current_result = manual_stats
+    st.session_state.current_signature = manual_stats["signature"]
+    st.session_state.current_image = None
+    st.session_state.current_debug_image = None
     current_stats = manual_stats
     if st.button("Ajouter le manuel au cumul", type="primary", use_container_width=True):
-        add_scan_to_history(manual_stats, force=True)
+        if add_scan_to_history(manual_stats):
+            st.session_state.last_add_message = "Saisie manuelle ajoutee au cumul."
+        else:
+            st.session_state.last_add_message = "Saisie manuelle vide ou identique a la derniere entree."
+        st.rerun()
 
 if st.session_state.last_error:
     st.error(st.session_state.last_error)
@@ -496,19 +528,34 @@ render_stat_cards("Statistiques du scan actuel", current_stats)
 render_stat_cards("Cumul global depuis le lancement", global_stats)
 
 manual_add_cols = st.columns([1, 1, 2])
-if manual_add_cols[0].button("Ajouter ce scan au cumul", use_container_width=True):
+if manual_add_cols[0].button("Ajouter ce scan au cumul", type="primary", use_container_width=True):
     if st.session_state.current_result:
-        added = add_scan_to_history(st.session_state.current_result, force=True)
-        st.success("Scan ajoute au cumul." if added else "Scan deja present.")
+        added = add_scan_to_history(st.session_state.current_result)
+        st.session_state.last_add_message = (
+            "Scan ajoute au cumul." if added else "Scan vide ou identique au dernier scan ajoute."
+        )
+        st.rerun()
     else:
         st.warning("Aucun scan actuel a ajouter.")
 manual_add_cols[1].metric("Nouveau scan detecte", "Oui" if signature_changed else "Non")
+reset_cols = st.columns(2)
+if reset_cols[0].button("Reinitialiser scan actuel", use_container_width=True):
+    reset_current_scan()
+    st.rerun()
+if reset_cols[1].button("Reinitialiser cumul global", use_container_width=True):
+    reset_global_history()
+    st.rerun()
+
+if st.session_state.last_add_message:
+    st.info(st.session_state.last_add_message)
 
 st.markdown("### Zone analysee")
 if st.session_state.current_image is None:
     st.info("Aucune capture analysee pour le moment.")
 else:
     image_to_show = st.session_state.current_debug_image if debug_mode else st.session_state.current_image
+    block_count = len(st.session_state.current_result.get("blocks", [])) if st.session_state.current_result else 0
+    st.metric("Blocs detectes dans la zone", block_count)
     st.image(image_to_show, caption="Derniere capture analysee", use_container_width=True)
 
 st.markdown("### Graphiques")
@@ -529,10 +576,10 @@ if history_cols[0].button("Supprimer derniere entree", use_container_width=True)
         st.session_state.last_added_signature = (
             st.session_state.history[-1]["signature"] if st.session_state.history else ""
         )
+        st.rerun()
 if history_cols[1].button("Vider historique", use_container_width=True):
-    st.session_state.history = []
-    st.session_state.scan_counter = 0
-    st.session_state.last_added_signature = ""
+    reset_global_history()
+    st.rerun()
 history_cols[2].download_button(
     "Exporter CSV",
     data=export_history_csv(),
