@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .matplotlib/
+.playwright-profile/
 streamlit.out.log
 streamlit.err.log
 .streamlit/secrets.toml

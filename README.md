@@ -34,6 +34,15 @@ Options :
 - Bouton `Analyser URL`
 - Capture pleine page
 - Capture zone personnalisee avec `x`, `y`, `largeur`, `hauteur`
+- Option `Afficher le navigateur pour fermer les popups ou se connecter manuellement`
+
+Utilisation conseillee :
+
+1. Garder `Afficher le navigateur` active.
+2. Cliquer sur `Analyser URL`.
+3. Quand le navigateur s'ouvre, fermer manuellement les popups, choisir les cookies et se connecter si necessaire.
+4. Attendre la capture automatique apres le delai choisi.
+5. Si le jeu reste masque ou inaccessible, utiliser le mode `Scan ecran local`.
 
 Si l'URL est bloquee par login, iframe, Cloudflare ou restriction du site, l'application affiche :
 

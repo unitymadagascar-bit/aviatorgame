@@ -4,6 +4,8 @@ from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
+os.environ.setdefault("MPLCONFIGDIR", str(Path(__file__).with_name(".matplotlib")))
+
 import cv2
 import matplotlib.pyplot as plt
 import mss
@@ -11,8 +13,6 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw
-
-os.environ.setdefault("MPLCONFIGDIR", str(Path(__file__).with_name(".matplotlib")))
 
 try:
     from playwright.sync_api import Error as PlaywrightError
@@ -63,20 +63,38 @@ def capture_url_with_playwright(
     viewport_width: int,
     viewport_height: int,
     wait_seconds: int,
+    show_browser: bool,
 ) -> Image.Image:
     if sync_playwright is None:
         raise RuntimeError(URL_BLOCKED_MESSAGE)
 
+    context = None
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": viewport_width, "height": viewport_height})
-            page.goto(url, wait_until="networkidle", timeout=45000)
+            profile_dir = Path(__file__).with_name(".playwright-profile")
+            context = playwright.chromium.launch_persistent_context(
+                str(profile_dir),
+                headless=not show_browser,
+                viewport={"width": viewport_width, "height": viewport_height},
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=45000)
             page.wait_for_timeout(wait_seconds * 1000)
+            page_text = page.locator("body").inner_text(timeout=5000).lower()
+            blocked_markers = ["avertissement", "autoriser tous les cookies", "cloudflare"]
+            if any(marker in page_text for marker in blocked_markers):
+                raise RuntimeError(URL_BLOCKED_MESSAGE)
             screenshot = page.screenshot(full_page=full_page)
-            browser.close()
+            context.close()
+            context = None
     except (PlaywrightError, PlaywrightTimeoutError) as exc:
         raise RuntimeError(URL_BLOCKED_MESSAGE) from exc
+    finally:
+        if context is not None:
+            try:
+                context.close()
+            except Exception:
+                pass
 
     image = Image.open(BytesIO(screenshot)).convert("RGB")
     if use_custom_zone:
@@ -464,15 +482,26 @@ if mode == "URL avec Playwright":
     full_page = col_a.checkbox("Capture pleine page", value=False)
     viewport_width = col_b.number_input("Largeur navigateur", min_value=600, value=1365, step=50)
     viewport_height = col_c.number_input("Hauteur navigateur", min_value=400, value=768, step=50)
-    wait_seconds = st.slider("Attente chargement complet (secondes)", 1, 20, 6)
+    show_browser = st.checkbox(
+        "Afficher le navigateur pour fermer les popups ou se connecter manuellement",
+        value=True,
+    )
+    wait_max = 90 if show_browser else 20
+    wait_default = 25 if show_browser else 6
+    wait_seconds = st.slider("Attente avant capture (secondes)", 1, wait_max, wait_default)
+    if show_browser:
+        st.info(
+            "Quand le navigateur s'ouvre, fermez vous-meme les popups, acceptez ou refusez les cookies, "
+            "et connectez-vous si necessaire. L'application prendra ensuite une capture, sans cliquer a votre place."
+        )
 
-    use_custom_zone = st.checkbox("Capture zone personnalisee")
+    use_custom_zone = st.checkbox("Capture zone personnalisee", value=True)
     if use_custom_zone:
         zone_cols = st.columns(4)
-        zone_x = zone_cols[0].number_input("x", min_value=0, value=0, step=10)
-        zone_y = zone_cols[1].number_input("y", min_value=0, value=0, step=10)
-        zone_width = zone_cols[2].number_input("largeur", min_value=50, value=900, step=10)
-        zone_height = zone_cols[3].number_input("hauteur", min_value=50, value=260, step=10)
+        zone_x = zone_cols[0].number_input("x", min_value=0, value=30, step=10)
+        zone_y = zone_cols[1].number_input("y", min_value=0, value=120, step=10)
+        zone_width = zone_cols[2].number_input("largeur", min_value=50, value=850, step=10)
+        zone_height = zone_cols[3].number_input("hauteur", min_value=50, value=140, step=10)
     else:
         zone_x, zone_y, zone_width, zone_height = 0, 0, int(viewport_width), int(viewport_height)
 
@@ -489,6 +518,7 @@ if mode == "URL avec Playwright":
                 int(viewport_width),
                 int(viewport_height),
                 int(wait_seconds),
+                bool(show_browser),
             )
             result = analyze_image("URL", image, settings)
             if auto_add:
