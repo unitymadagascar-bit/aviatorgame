@@ -1,33 +1,18 @@
 # Crash Live Screen Counter
 
-Crash Live Screen Counter est une application Python Streamlit qui scanne une zone de l'ecran ou l'historique d'un crash game est visible.
+Crash Live Screen Counter est une application Python Streamlit dont le fichier principal est `app.py`.
 
-Elle compte en direct :
+Elle sert a analyser une zone visible de l'ecran pour compter les couleurs d'un historique de crash game et lire, si possible, des gains visibles avec OCR.
 
-- Bleu
-- Autres couleurs
-- Total des tours visibles
+Important : l'application ne predit pas le prochain tour, ne garantit aucun gain et ne doit pas automatiser les paris.
 
-Elle tente aussi de lire les gains publics visibles avec OCR, puis calcule :
-
-- nombre de gains affiches
-- somme totale des gains visibles
-- gain moyen visible
-- plus gros gain visible
-
-L'application analyse seulement des informations visibles publiquement sur votre ecran. Elle ne se connecte pas au site, ne contourne aucune securite, n'automatise pas les mises, ne predit pas le prochain tour et ne garantit aucun gain.
-
-## Installation
+## Installation locale
 
 ```bash
 pip install -r requirements.txt
 ```
 
-`pytesseract` est une interface Python. Pour que l'OCR fonctionne, le logiciel Tesseract OCR doit aussi etre installe sur la machine et accessible dans le PATH.
-
-Si Tesseract est trop complique a installer, une future variante peut utiliser `easyocr` comme alternative, mais cette version reste basee sur `pytesseract`.
-
-## Lancement
+## Lancement local
 
 ```bash
 streamlit run app.py
@@ -36,41 +21,67 @@ streamlit run app.py
 ## Utilisation
 
 1. Ouvrir la page du jeu.
-2. Lancer l'application.
+2. Lancer l'application Streamlit.
 3. Entrer les coordonnees `x`, `y`, `largeur`, `hauteur` de la zone a scanner.
 4. Cliquer sur `Demarrer le scan`.
 5. Ajuster les sliders HSV si necessaire.
-6. Verifier le mode debug pour voir les rectangles detectes.
+6. Activer le mode debug pour verifier les rectangles detectes.
 7. Telecharger le CSV si necessaire.
 
-## Reglages
+## Deploiement recommande
 
-- `Hue/Saturation/Valeur bleu` : calibre la detection du bleu.
-- `Saturation minimale du texte colore` : ignore les elements trop gris ou trop fades.
-- `Luminosite minimale du texte colore` : ignore les elements trop sombres.
-- `Surface minimale detectee` : evite les petits artefacts.
-- `Distance de regroupement` : regroupe les chiffres proches pour eviter de compter le meme multiplicateur plusieurs fois.
+### Streamlit Community Cloud
 
-## Export CSV
+Plateforme recommandee pour une app Streamlit simple.
 
-Le CSV contient :
+1. Pousser ce depot sur GitHub.
+2. Aller sur Streamlit Community Cloud.
+3. Creer une nouvelle app depuis le depot GitHub.
+4. Choisir `app.py` comme fichier principal.
+5. Laisser Streamlit installer les dependances depuis `requirements.txt`.
 
-- `datetime`
-- `bleu`
-- `autres_couleurs`
-- `total_tours`
-- `pourcentage_bleu`
-- `pourcentage_autres`
-- `nombre_gains_visibles`
-- `somme_gains_visibles`
-- `gain_moyen_visible`
-- `plus_gros_gain_visible`
+Le fichier `packages.txt` installe `tesseract-ocr` sur Streamlit Community Cloud pour aider `pytesseract`.
 
-## Limites
+### Render
 
-- L'application ne predit pas le prochain tour.
-- Les tours d'un crash game sont normalement independants.
-- L'application ne garantit aucun gain.
+Render peut lancer l'app comme service web Streamlit.
+
+Le fichier `render.yaml` est fourni avec :
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py --server.address 0.0.0.0 --server.port $PORT
+```
+
+Sur Render, creer un Web Service depuis ce depot, ou utiliser le blueprint `render.yaml`.
+
+## Ne pas utiliser Vercel pour cette app
+
+Vercel n'est pas adapte ici pour lancer Streamlit directement. Son runtime Python attend une fonction exportee nommee `app`, `application` ou `handler`, comme pour une API Python.
+
+Ce projet doit rester une application Streamlit avec :
+
+```bash
+streamlit run app.py
+```
+
+Il ne faut pas transformer `app.py` en fonction API Vercel.
+
+## OCR et Tesseract
+
+`pytesseract` est une interface Python. Pour que l'OCR fonctionne, le binaire Tesseract OCR doit aussi etre installe dans l'environnement.
+
+- Sur Streamlit Community Cloud, `packages.txt` installe `tesseract-ocr`.
+- En local, installer Tesseract OCR puis verifier qu'il est disponible dans le `PATH`.
+- Si Tesseract est trop complique a installer, `easyocr` peut etre envisage comme alternative dans une version future.
+
+## Limites importantes
+
+- L'application analyse seulement ce qui est visible sur l'ecran.
+- Sur un hebergement cloud, le serveur ne peut pas voir l'ecran local de l'utilisateur comme une application lancee sur son ordinateur.
+- Le scan d'ecran live est donc surtout adapte a une execution locale.
 - Les donnees OCR peuvent contenir des erreurs.
-- Elle analyse seulement ce qui est visible sur l'ecran.
+- Les tours d'un crash game sont normalement independants.
+- L'application ne predit pas le prochain tour.
+- L'application ne garantit aucun gain.
 - Elle ne doit pas automatiser les paris.

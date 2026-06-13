@@ -1,6 +1,6 @@
 streamlit
 mss
-opencv-python
+opencv-python-headless
 numpy
 pandas
 matplotlib
